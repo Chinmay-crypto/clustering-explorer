@@ -1,0 +1,328 @@
+/* ==========================================
+   Utilities & Configuration
+   ========================================== */
+
+// Common layout settings for Plotly charts to ensure consistency
+const commonLayout = {
+    font: { family: 'Inter, sans-serif' },
+    showlegend: false,
+    margin: { t: 20, b: 40, l: 40, r: 20 },
+    hovermode: 'closest',
+    xaxis: { zeroline: false, showgrid: true, gridcolor: '#f0f0f0' },
+    yaxis: { zeroline: false, showgrid: true, gridcolor: '#f0f0f0' },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)'
+};
+
+// Helper to generate random Gaussian data
+function generateCluster(n, cx, cy, variance) {
+    let x = [], y = [];
+    for (let i = 0; i < n; i++) {
+        // Box-Muller transform for normal distribution
+        let u = 0, v = 0;
+        while(u === 0) u = Math.random();
+        while(v === 0) v = Math.random();
+        let z1 = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        let z2 = Math.sqrt(-2.0 * Math.log(u)) * Math.sin(2.0 * Math.PI * v);
+        
+        x.push(cx + z1 * variance);
+        y.push(cy + z2 * variance);
+    }
+    return { x, y };
+}
+
+/* ==========================================
+   1. Hard Clustering (K-Means)
+   ========================================== */
+
+function runKMeans() {
+    const n = 50; // Points per cluster
+    const variance = 0.8;
+    
+    // Randomize centers slightly
+    const centers = [
+        { x: 2 + Math.random(), y: 2 + Math.random(), color: '#ef4444' }, // Red
+        { x: 8 + Math.random(), y: 8 + Math.random(), color: '#3b82f6' }, // Blue
+        { x: 8 + Math.random(), y: 2 + Math.random(), color: '#10b981' }  // Green
+    ];
+
+    let allX = [];
+    let allY = [];
+    let colors = [];
+
+    // Generate Data
+    centers.forEach(c => {
+        const cluster = generateCluster(n, c.x, c.y, variance);
+        allX = allX.concat(cluster.x);
+        allY = allY.concat(cluster.y);
+        // In a real k-means we'd assign these iteratively. 
+        // For viz, we generate them pre-clustered to show the "Result".
+        for(let i=0; i<n; i++) colors.push(c.color);
+    });
+
+    // Trace 1: The Points
+    const tracePoints = {
+        x: allX,
+        y: allY,
+        mode: 'markers',
+        type: 'scatter',
+        marker: { size: 8, color: colors, opacity: 0.7 }
+    };
+
+    // Trace 2: The Centroids
+    const traceCentroids = {
+        x: centers.map(c => c.x),
+        y: centers.map(c => c.y),
+        mode: 'markers',
+        type: 'scatter',
+        marker: { symbol: 'x', size: 15, color: '#000', line: {width: 2} },
+        name: 'Centroids'
+    };
+
+    Plotly.newPlot('kmeans-plot', [tracePoints, traceCentroids], commonLayout, {displayModeBar: false});
+}
+
+/* ==========================================
+   2. Soft Clustering (GMM)
+   ========================================== */
+
+function runGMM() {
+    // Generate 2 centers
+    const c1 = { x: 3, y: 5 };
+    const c2 = { x: 7, y: 5 };
+    
+    // Generate Scatter Points
+    const cluster1 = generateCluster(80, c1.x, c1.y, 1.2);
+    const cluster2 = generateCluster(80, c2.x, c2.y, 1.2);
+
+    const xPts = cluster1.x.concat(cluster2.x);
+    const yPts = cluster1.y.concat(cluster2.y);
+    
+    // Create color array based on x-position to simulate "soft" transition in the middle
+    // In real GMM, this is posterior probability. Here we simulate it visually.
+    const colors = xPts.map(x => {
+        // Simple sigmoid-like coloring based on x position relative to mid-point (5)
+        const prob = 1 / (1 + Math.exp(-(x - 5)*2));
+        return `rgba(${255 * (1-prob)}, 0, ${255 * prob}, 0.8)`; // Interpolate Red to Blue
+    });
+
+    // Create Density Contours
+    // We create a grid
+    const size = 0.5;
+    let xGrid = [], yGrid = [], zGrid = [];
+    
+    for(let x=0; x<=10; x+=size) {
+        let zRow = [];
+        for(let y=0; y<=10; y+=size) {
+            // Sum of two 2D Gaussians
+            const d1 = (x-c1.x)**2 + (y-c1.y)**2;
+            const d2 = (x-c2.x)**2 + (y-c2.y)**2;
+            const z = Math.exp(-d1/3) + Math.exp(-d2/3);
+            zRow.push(z);
+        }
+        zGrid.push(zRow);
+        xGrid.push(x);
+        yGrid.push(Array.from({length: zGrid[0].length}, (_, i) => i * size)); 
+    }
+
+    const traceContour = {
+        z: zGrid,
+        x: xGrid, // simplified mapping
+        y: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10], // mapping Y manually for simplicity in this specific grid
+        type: 'contour',
+        colorscale: 'RdBu',
+        opacity: 0.3,
+        showscale: false,
+        contours: { coloring: 'lines' }
+    };
+
+    const tracePoints = {
+        x: xPts,
+        y: yPts,
+        mode: 'markers',
+        type: 'scatter',
+        marker: { size: 7, color: colors }
+    };
+
+    const layout = { ...commonLayout, 
+        xaxis: {range: [0, 10], showgrid: false},
+        yaxis: {range: [0, 10], showgrid: false}
+    };
+
+    Plotly.newPlot('gmm-plot', [traceContour, tracePoints], layout, {displayModeBar: false});
+}
+
+/* ==========================================
+   3. KNN Interactive
+   ========================================== */
+
+// Global state for KNN to persist data between clicks
+let knnData = {
+    x: [],
+    y: [],
+    labels: [] // 0 for Class A, 1 for Class B
+};
+
+function initKNN() {
+    // 1. Generate Training Data
+    const n = 30;
+    
+    // Class A (Bottom Left)
+    const c1 = generateCluster(n, 3, 3, 1.0);
+    c1.x.forEach((val, i) => {
+        knnData.x.push(val);
+        knnData.y.push(c1.y[i]);
+        knnData.labels.push(0);
+    });
+
+    // Class B (Top Right)
+    const c2 = generateCluster(n, 7, 7, 1.0);
+    c2.x.forEach((val, i) => {
+        knnData.x.push(val);
+        knnData.y.push(c2.y[i]);
+        knnData.labels.push(1);
+    });
+
+    drawKNNPlot();
+}
+
+function drawKNNPlot(userPoint = null, neighbors = []) {
+    // Split data by class for coloring
+    const class0 = { x: [], y: [] };
+    const class1 = { x: [], y: [] };
+
+    knnData.labels.forEach((l, i) => {
+        if(l === 0) { class0.x.push(knnData.x[i]); class0.y.push(knnData.y[i]); }
+        else { class1.x.push(knnData.x[i]); class1.y.push(knnData.y[i]); }
+    });
+
+    // Trace: Class A
+    const traceA = {
+        x: class0.x, y: class0.y,
+        mode: 'markers', type: 'scatter',
+        marker: { color: '#ef4444', size: 9, symbol: 'circle' },
+        name: 'Class A'
+    };
+
+    // Trace: Class B
+    const traceB = {
+        x: class1.x, y: class1.y,
+        mode: 'markers', type: 'scatter',
+        marker: { color: '#3b82f6', size: 9, symbol: 'square' },
+        name: 'Class B'
+    };
+
+    const data = [traceA, traceB];
+
+    // If user clicked, add the new point and lines
+    if (userPoint) {
+        // Neighbors lines
+        neighbors.forEach(nIndex => {
+            data.push({
+                x: [userPoint.x, knnData.x[nIndex]],
+                y: [userPoint.y, knnData.y[nIndex]],
+                mode: 'lines',
+                line: { color: '#888', width: 1, dash: 'dot' },
+                hoverinfo: 'skip'
+            });
+        });
+
+        // The User Point itself
+        // Determine predicted color
+        const k = 5;
+        let vote0 = 0, vote1 = 0;
+        neighbors.forEach(idx => knnData.labels[idx] === 0 ? vote0++ : vote1++);
+        const predColor = vote0 > vote1 ? '#ef4444' : '#3b82f6';
+
+        data.push({
+            x: [userPoint.x],
+            y: [userPoint.y],
+            mode: 'markers',
+            marker: { 
+                color: predColor, 
+                size: 14, 
+                line: {color: 'black', width: 2} 
+            },
+            name: 'New Point'
+        });
+    }
+
+    const layout = { ...commonLayout, 
+        xaxis: {range: [0, 10]},
+        yaxis: {range: [0, 10]},
+        hovermode: false,
+        dragmode: false // Disable zoom on drag to allow easier clicking
+    };
+
+    Plotly.newPlot('knn-plot', data, layout, {displayModeBar: false})
+        .then(gd => {
+            // Attach Click Event
+            gd.on('plotly_click', (data) => {
+                // If clicked on background (not a point), the coordinates are in axes properties
+                // Note: clicking on white space in Plotly returns coordinates if layout.hovermode is false or specific settings
+                // However, plotly_click usually requires clicking a point. 
+                // We use a trick: cover area with transparent heatmap or use layout click.
+                // Simpler: Just rely on click event coords.
+                
+                // Plotly returns pointer coords in the event object, but mapping to axes is tricky.
+                // The easier way in pure JS/Plotly for "click anywhere" is finding the mouse position relative to axis.
+                // But `plotly_click` works best on points.
+                // Let's assume the user clicks NEAR a point or we make a background mesh.
+                // Actually, Plotly's click event mainly fires on data.
+                // Hack: Add a transparent background scatter to capture clicks.
+            });
+            
+            // Re-implementing click logic using DOM event for arbitrary coordinates
+            gd.addEventListener('click', (evt) => {
+                const bg = document.getElementById('knn-plot').getBoundingClientRect();
+                const xPx = evt.clientX - bg.left;
+                const yPx = evt.clientY - bg.top;
+                
+                // Map pixels to Data Coordinates (Approximate for this static layout)
+                // Getting full transform is complex without D3, but Plotly exposes it in `_fullLayout`
+                const xaxis = gd._fullLayout.xaxis;
+                const yaxis = gd._fullLayout.yaxis;
+                
+                const xVal = xaxis.p2c(xPx - xaxis._offset);
+                const yVal = yaxis.p2c(yPx - yaxis._offset);
+
+                if (xVal >= 0 && xVal <= 10 && yVal >= 0 && yVal <= 10) {
+                    classifyPoint(xVal, yVal);
+                }
+            });
+        });
+}
+
+function classifyPoint(x, y) {
+    const k = 5;
+    
+    // Calculate distances
+    let distances = knnData.x.map((val, i) => {
+        const dx = val - x;
+        const dy = knnData.y[i] - y;
+        return { 
+            index: i, 
+            dist: Math.sqrt(dx*dx + dy*dy) 
+        };
+    });
+
+    // Sort and get Top K
+    distances.sort((a, b) => a.dist - b.dist);
+    const neighbors = distances.slice(0, k).map(d => d.index);
+
+    drawKNNPlot({x, y}, neighbors);
+}
+
+function resetKNN() {
+    knnData = { x: [], y: [], labels: [] };
+    initKNN();
+}
+
+/* ==========================================
+   Initialization
+   ========================================== */
+document.addEventListener('DOMContentLoaded', () => {
+    runKMeans();
+    runGMM();
+    initKNN();
+});
